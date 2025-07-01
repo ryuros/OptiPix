@@ -1,0 +1,827 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Image Optimizer</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&family=Noto+Sans+KR:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        
+        body {
+            font-family: Inter, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Oxygen, Ubuntu, Cantarell, Fira Sans, Droid Sans, Helvetica Neue, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: var(--figma-color-bg);
+            color: var(--figma-color-text);
+            width: 300px; /* 플러그인 창 너비 */
+            height: 100vh;
+            overflow: hidden; /* 스크롤 방지 */
+            -webkit-font-smoothing: antialiased; /* 폰트 안티앨리어싱 (Mac/iOS) */
+        }
+
+
+        /* 공통 여백 및 리셋 */
+        p {
+            margin-bottom: 0;
+            margin-top: 0;
+        }
+
+        /* 전체 UI 랩퍼 (카드 형태) */
+        .wrap {
+            border-radius: 4px; 
+            padding: 28px 24px 32px 24px; /* 내부 패딩 */
+            display: flex;
+            flex-direction: column;
+            gap: 72px; /* 섹션 간 간격 (이미지 기준) */
+        }
+
+        .wrap .formwrap {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }    
+
+        /* 섹션별 스타일 */
+        .section-group {
+            display: flex;
+            flex-direction: column;
+            gap: 16px; /* 라벨과 입력/슬라이더 그룹 간 간격 */
+        }
+
+        /* 라벨과 설명 텍스트 (툴팁 아이콘 포함) */
+        label {
+            display: flex; /* 아이콘과 정렬을 위해 flex 사용 */
+            align-items: center; /* 세로 중앙 정렬 */
+            margin-bottom: 0;
+            font-family: Noto Sans KR;
+            font-weight: 700; /* Noto Sans KR Bold */
+            font-size: 14px;
+            color: #FFFFFF; /* 텍스트 색상 */
+            letter-spacing: -0.28px;
+            line-height: 1.5;
+        }
+
+        /* 툴팁 트리거 (물음표 아이콘) */
+        .tooltip-trigger {
+            position: relative; /* 툴팁 위치 지정을 위해 */
+            display: inline-flex; /* 아이콘이 텍스트 흐름에 맞게 */
+            align-items: center;
+            margin-left: 4px; /* 라벨 텍스트와의 간격 */
+            cursor: pointer;
+            width: 16px; /* 아이콘이 클릭 영역 차지하도록 고정 */
+            height: 16px;
+            justify-content: center;
+        }
+
+        /* 물음표 SVG 아이콘 스타일 */
+        .question-icon {
+            width: 16px; /* 아이콘 크기 이미지 기준 */
+            height: 16px;
+            fill: #8B8795; /* 아이콘 색상 이미지 기준 */
+            transition: opacity 0.2s ease;
+        }
+
+        .tooltip-trigger:hover .question-icon {
+            opacity: 1; /* 호버 시 진하게 */
+        }
+
+        /* 툴팁 내용 스타일 */
+        .tooltip-content {
+            display: none; /* 기본적으로 숨김 */
+            position: absolute;
+            top: calc(100% + 8px); /* 아이콘 위 8px 간격 */
+            left: 50%;
+            transform: translateX(-50%); /* 중앙 정렬 */
+            background-color: #19181C; /* 툴팁 배경색 */
+            border-color:#333237;
+            color: #888888; /* 텍스트 색상 */
+            font-family: Noto Sans KR;
+            font-size: 11px;
+            font-weight: 400; /* 설명 텍스트는 보통 굵기 */
+            line-height: 1.4;
+            padding: 8px 12px;
+            border-radius: 6px; /* radius */
+            white-space: normal; /* 텍스트 줄바꿈 허용 */
+            width: 160px; /* 툴팁 너비 제한 */
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4); /* 그림자 더 진하게 */
+            z-index: 10; /* 다른 요소 위에 표시 */
+            pointer-events: none; /* 툴팁 위 클릭 방지 */
+            text-align: left; /* 텍스트 왼쪽 정렬 */
+            letter-spacing: normal; /* 툴팁 자간은 기본 */
+        }
+
+        /* 툴팁 화살표 */
+        .tooltip-content::after {
+            content: '';
+            position: absolute;
+            top: -6%; /* 툴팁 하단에 위치 */
+            left: 50%;
+            transform: translateX(-50%) rotate(45deg); /* 삼각형 모양 */
+            width: 8px;
+            height: 8px;
+            background-color: #19181C; /* 툴팁 배경색과 동일 */
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+            z-index: -1; /* 툴팁 내용 뒤로 */
+        }
+
+        /* 툴팁 호버 시 표시 */
+        .tooltip-trigger:hover .tooltip-content {
+            display: block;
+        }
+
+        /* Image Quality Line (라벨과 입력 필드를 한 줄에) */
+        .textform {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        /* Image Quality의 라벨/설명 텍스트 랩퍼 */
+        .textwrap {
+            display: flex;
+            flex-direction: column;
+            gap: 0px;
+        }
+
+
+        /* 숫자 입력 필드와 스피너 그룹 */
+        .input-spinner-group {
+            display: flex;
+            align-items: center;
+            border: 2px solid #4B4A50; /* 테두리색 이미지 기준 */
+            border-radius: 6px; /* radius */
+            background-color: #2C2C2C; /* 배경색 */
+        }
+        .input-spinner-group input[type="number"] {
+            flex-grow: 1;
+            padding: 8px 12px;
+            border: none;
+            outline: none;
+            font-family: Inter;
+            font-size: 15px;
+            font-weight: 700; /* Bold */
+            color: #FFFFFF; /* 폰트 색상 */
+            text-align: right; /* 오른쪽 정렬 */
+            background: transparent;
+            -moz-appearance: textfield;
+            appearance: textfield;
+            width: 50px; /* 이미지에서 인풋 필드 너비가 작아 보임 */
+        }
+        .input-spinner-group input[type="number"]::-webkit-outer-spin-button,
+        .input-spinner-group input[type="number"]::-webkit-inner-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+        .input-spinner-group .unit {
+            font-family: Inter;
+            font-size: 14px;
+            font-weight: 700;
+            color: #FFFFFF;
+            padding-right: 8px;
+        }
+        .input-spinner-group .spinner-buttons {
+            display: flex;
+            flex-direction: column;
+            padding-right: 6px;
+        }
+        .input-spinner-group .spinner-btn {
+            width: 16px;
+            height: 10px;
+            background-color: #755BF9; /* 스피너 버튼 배경 투명 */
+            border: none;
+            padding: 0;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background-color 0.1s ease;
+        }
+
+        /* resize-up-btn 에 적용할 개별 패딩 */
+        #resize-up-btn {
+        padding-top: 3px;   /* 위쪽 패딩 */
+        padding-bottom: 1px; /* 아래쪽 패딩 */
+        /* 또는 모든 방향 동일하게: padding: 1px 0; */
+        }
+
+        /* resize-down-btn 에 적용할 개별 패딩 */
+        #resize-down-btn {
+        padding-top: 1px;   /* 위쪽 패딩 */
+        padding-bottom: 3px; /* 아래쪽 패딩 */
+        /* 또는 모든 방향 동일하게: padding: 1px 0; */
+        }
+
+        .input-spinner-group .spinner-btn:hover {
+            background-color: #604acd; /* 호버 시 색상 변경 */
+        }
+        .input-spinner-group .spinner-btn:first-child {
+            border-top-right-radius: 4px; /* radius */
+            border-top-left-radius: 4px;
+        }
+        .input-spinner-group .spinner-btn:last-child {
+            border-bottom-right-radius: 4px; /* radius */
+            border-bottom-left-radius: 4px;
+        }
+        .input-spinner-group .spinner-btn svg {
+            width: 6px;
+            height: 4px;
+            fill: #DDDDDD; /* SVG 아이콘 색상 이미지 기준 */
+        }
+        .input-spinner-group .spinner-btn:last-child svg {
+            transform: scaleY(-1);
+        }
+
+        /* 퀵 버튼 그룹 */
+        .quick-buttons-group {
+            display: grid;
+            /* 이미지에 6개 버튼이 있으므로 6개 균등 분할 */
+            grid-template-columns: repeat(6, 1fr); 
+            gap: 4px; /* 버튼 간 간격 이미지 기준 */
+            margin-top: 8px; /* 상단 여백 이미지 기준 */
+        }
+        .quick-buttons-group button {
+            background-color: #363538; 
+            border: 1px solid #414146; 
+            border-radius: 4px; 
+            color: #FFFFFF; /* 텍스트색 이미지 기준 */
+            font-family: Inter;
+            font-weight: 500;
+            font-size: 13px;
+            padding: 6px 0; /* 상하 패딩 이미지 기준 */
+            cursor: pointer;
+            transition: all 0.2s ease;
+            text-align: center;
+        }
+        .quick-buttons-group button:hover {
+            background-color: #6938EF; 
+        }
+        .quick-buttons-group button.active {
+            background-color: #6938EF;
+            border-color: #6938EF;
+            color: #FFFFFF;
+        }
+
+        /* 슬라이더 (Range Input) */
+        .slider-container {
+            position: relative;
+            /* 툴팁이 슬라이더 위에 위치할 공간을 확보하기 위해 padding-top 사용 (툴팁 높이 + 핸들 여백 + 간격) */
+            padding-top: 12px; /* 툴팁 top:0 + 툴팁높이 24 + 화살표 4 + 간격 8px 정도 예상 */
+        }
+        .slider-container input[type="range"] {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 100%;
+            height: 6px;
+            background: #555555; /* 트랙의 채워지지 않은 부분 색상 (이미지 기준) */
+            border-radius: 4px; /* radius */
+            outline: none;
+            cursor: pointer;
+            margin: 0;
+            position: relative;
+            z-index: 1;
+        }
+        /* 슬라이더 트랙의 채워지는 부분 */
+        input[type="range"]::-webkit-slider-runnable-track {
+            background: linear-gradient(to right, #6938EF var(--slider-fill-percentage, 0%), #3F3F43 var(--slider-fill-percentage, 0%));
+            border-radius: 4px; /* radius */
+            height: 6px;
+        }
+        input[type="range"]::-moz-range-track {
+            background: linear-gradient(to right, #6938EF var(--slider-fill-percentage, 0%), #3F3F43 var(--slider-fill-percentage, 0%));
+            border-radius: 4px; /* radius */
+            height: 6px;
+        }
+
+        /* 슬라이더 핸들 (Thumb) */
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #ffffff; /* 핸들 배경색 이미지 기준 */
+            cursor: grab;
+            box-shadow: 0 4px 4px rgba(0,0,0,0.15); /* 핸들 그림자 좀 더 진하게 */
+            margin-top: -7px; /* 트랙 중앙에 오도록 조정 (핸들 높이/2 - 트랙 높이/2) */
+            position: relative;
+            z-index: 2;
+            transition: transform 0.1s ease;
+        }
+        input[type="range"]::-moz-range-thumb {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #FFFFFF;
+            cursor: grab;
+            box-shadow: 0 4px 4px rgba(0,0,0,0.15);
+            border: 1px solid #777777;
+            z-index: 2;
+            transition: transform 0.1s ease;
+        }
+
+        /* 핸들 클릭/활성화 시 */
+        input[type="range"]:active::-webkit-slider-thumb,
+        input[type="range"]:active::-moz-range-thumb {
+            cursor: grabbing;
+            transform: scale(1.05);
+        }
+
+        /* 슬라이더 값 표시 툴팁 */
+        .slider-value-display {
+            background-color: #362D4E; /* 툴팁 배경색 이미지 기준 */
+            border: 1px solid #6938EF; /* 테두리 추가 */           
+            border-radius: 6px; /* radius */
+            color: #FFFFFF; /* 텍스트 색상 */
+            font-family: 'Inter';
+            font-size: 12px;
+            font-weight: 700; /* Bold */
+            padding: 5px 8px; /* 툴팁 내부 여백 */
+            position: absolute;
+            bottom: -42px; /* slider-container의 padding-top 시작점에 위치 */
+            left: var(--thumb-position, 50%);
+            transform: translateX(-50%);
+            white-space: nowrap;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.4); /* 그림자 더 진하게 */
+            z-index: 3;
+            pointer-events: none;
+        }
+        .slider-value-display::after {
+            content: '';
+            position: absolute;
+            top: 0%; /* 툴팁 본체 아래에 위치 */
+            left: 50%;
+            transform: translateX(-50%) translateY(-50%) rotate(45deg); /* 화살표를 툴팁 본체 안으로 약간 당겨와서 연결 */
+            
+            width: 8px; /* 화살표 크기 (마름모 기준) */
+            height: 6px;
+            background-color: #362D4E; /* 툴팁 배경색과 동일 */
+            border: 1px solid #6938EF; /* 테두리 */
+            border-radius: 3px; /* 마름모 모서리 둥글게 */
+            
+            /* 화살표와 툴팁 본체가 만나는 부분의 테두리를 투명하게 하여 연결된 것처럼 보이게 함 */
+            border-bottom-color: transparent;
+            border-right-color: transparent;
+
+
+            z-index: -1; /* 툴팁 내용 뒤로 */
+        }
+
+        /* 결과 프리뷰 */
+        .size-preview-group {
+            font-family:'Noto Sans KR';
+            font-weight:400;
+            font-size:11px;
+            color: #999999; 
+            margin-bottom: 12px;
+            display:flex;
+            justify-content:center;
+            gap:8px;
+            padding:0px 12px;
+        }
+        
+
+        /* 메인 액션 버튼 */
+        .action-buttons-group {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .action-buttons-group button {
+            width: 100%;
+            padding: 14px 12px;
+            border-radius: 8px; /* radius */
+            font-family: Noto Sans KR;
+            font-size: 14px; /* 버튼 폰트 크기 이미지 기준 */
+            font-weight: 700; /* Bold */
+            text-align: center;
+            cursor: pointer;
+            transition: background-color 0.2s ease, box-shadow 0.2s ease, transform 0.1s ease;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            border: none;
+            color: #ffffff;
+            line-height: 1.5;
+            letter-spacing: -0.24px;
+        }
+        .action-buttons-group #optimize-button {
+            background-color: #6938EF; /* 주 컬러 */
+        }
+        .action-buttons-group #optimize-button:hover {
+            background-color: #5A2ECC; /* 주 컬러 호버 (이미지에서 약간 어두워짐) */
+            transform: translateY(-1px);
+        }
+        /* 'Export to Current Frame' 버튼과 'Export to External Folder' 버튼은 이미지에서 삭제됨 */
+        /* 따라서 이 부분의 CSS 규칙도 제거됩니다. */
+
+        .action-buttons-group button:active {
+            transform: translateY(0);
+            box-shadow: 0 1px 3px rgba(0,0,0,0.15) inset;
+        }
+    </style>
+</head>
+<body>
+    <div class="wrap">
+        <div class="formwrap">
+            <div class="section-group">
+                <div class="TextWrap">
+                    <label for="resize-percentage-input">
+                        이미지 픽셀 밀도
+                        <span class="tooltip-trigger">
+                            <svg class="question-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <g>
+                                    <path d="M12,22A10,10,0,1,1,22,12,10.01114,10.01114,0,0,1,12,22ZM12,4a8,8,0,1,0,8,8A8.00917,8.00917,0,0,0,12,4Z"></path>
+                                    <path d="M12,15a1,1,0,0,1-1-1V12.919a2.05062,2.05062,0,0,1,1.42627-1.98,1.50173,1.50173,0,0,0,1.02-1.855A1.47544,1.47544,0,0,0,12.41553,8.0542,1.50547,1.50547,0,0,0,10.5,9.5a1,1,0,0,1-2,0A3.47872,3.47872,0,0,1,9.85791,6.73193,3.51968,3.51968,0,0,1,12.916,6.11768a3.502,3.502,0,0,1,.07666,6.73925L13,14A1,1,0,0,1,12,15Z"></path>
+                                    <circle cx="12" cy="17" r="1"></circle>
+                                </g>
+                            </svg>
+                            <span class="tooltip-content">
+                                - 이미지의 내부 픽셀 해상도를 조절하여 파일 용량을 최적화합니다.<br>
+                                - PNG, JPG 모두 적용됩니다.
+                            </span>
+                        </span>
+                    </label>
+                </div>
+                
+                <div class="Form">
+                    <div class="input-spinner-group">
+                        <input type="number" id="resize-percentage-input" value="80" min="10" max="100">
+                        <span class="unit">%</span>
+                        <div class="spinner-buttons">
+                            <button class="spinner-btn" id="resize-up-btn">
+                                <svg width="9" height="5" viewBox="0 0 9 5" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M4.5 0L0 5H9L4.5 0Z" fill="#DDDDDD"/></svg>
+                            </button>
+                            <button class="spinner-btn" id="resize-down-btn">
+                                <svg width="9" height="5" viewBox="0 0 9 5" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M4.5 0L0 5H9L4.5 0Z" fill="#DDDDDD"/></svg>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div id="resize-quick-buttons" class="quick-buttons-group">
+                        <button data-value="90">90</button>
+                        <button data-value="80" class="active">80</button>
+                        <button data-value="70">70</button>
+                        <button data-value="60">60</button>
+                        <button data-value="50">50</button>
+                        <button data-value="40">40</button>
+                    </div>
+                </div>
+            </div>
+
+            <div style="width: 100%; height: 1px; background-color: #3c3b40;"></div> <div class="section-group">
+                <div class="textform">
+                    <div class="textwrap">
+                        <label for="quality-input">
+                            이미지 품질
+                            <span class="tooltip-trigger">
+                                <svg class="question-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <g>
+                                    <path d="M12,22A10,10,0,1,1,22,12,10.01114,10.01114,0,0,1,12,22ZM12,4a8,8,0,1,0,8,8A8.00917,8.00917,0,0,0,12,4Z"></path>
+                                    <path d="M12,15a1,1,0,0,1-1-1V12.919a2.05062,2.05062,0,0,1,1.42627-1.98,1.50173,1.50173,0,0,0,1.02-1.855A1.47544,1.47544,0,0,0,12.41553,8.0542,1.50547,1.50547,0,0,0,10.5,9.5a1,1,0,0,1-2,0A3.47872,3.47872,0,0,1,9.85791,6.73193,3.51968,3.51968,0,0,1,12.916,6.11768a3.502,3.502,0,0,1,.07666,6.73925L13,14A1,1,0,0,1,12,15Z"></path>
+                                    <circle cx="12" cy="17" r="1"></circle>
+                                </g>
+                                </svg>
+                                <span class="tooltip-content">
+                                    - JPG 압축에서 사용되는 품질 계수를 의미합니다.<br>
+                                    - PNG에는 영향을 주지 않습니다.<br>
+                                    - 100에 가까울수록 화질이 좋고 용량이 커집니다.
+                                </span>
+                            </span>
+                        </label>
+                    </div>    
+                    <div class="input-spinner-group" style="border: 2px solid #555555; height:30px; border-radius: 6px;">
+                        <input type="number" id="quality-input" value="80" min="1" max="100" style="text-align: center; flex-grow: 0;"> </div>
+                </div>
+
+                <div class="slider-container">
+                    <input type="range" id="quality-slider" min="1" max="100" value="80">
+                    <div id="quality-slider-value" class="slider-value-display">80</div>
+                </div>
+            </div>
+        </div>
+        <div>
+            <div class="size-preview-group">
+                <p>원본 : <span id="original-size">--</span></p>  
+                <div style="font-size:10px; align-content: center; color:#a5a5a7">→</div>
+                <p>최적화 : <span id="preview-size">--</span></p>
+            </div>
+
+            <div class="action-buttons-group">
+                <button id="optimize-button">이미지 최적화</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        
+        // UI 요소들을 가져옵니다.
+        const resizePercentageInput = document.getElementById('resize-percentage-input');
+        const resizeUpBtn = document.getElementById('resize-up-btn');
+        const resizeDownBtn = document.getElementById('resize-down-btn');
+        const resizeQuickButtons = document.getElementById('resize-quick-buttons');
+
+        const qualityInput = document.getElementById('quality-input');
+        const qualitySlider = document.getElementById('quality-slider');
+        const qualitySliderValue = document.getElementById('quality-slider-value'); // 슬라이더 값 표시 (툴팁)
+
+        const optimizeButton = document.getElementById('optimize-button');
+        // 'Export to Current Frame' 및 'Export to External Folder' 버튼이 제거되었으므로 관련 참조를 제거합니다.
+        // const exportToCurrentFrameButton = document.getElementById('export-to-current-frame');
+        // const exportToFolderButton = document.getElementById('export-to-folder'); 
+
+        // 새로 추가된 미리보기 요소들 (추가 시작)
+        const originalSizeDisplay = document.getElementById('original-size');
+        const previewSizeDisplay = document.getElementById('preview-size');
+
+        // 미리보기 계산을 위해 현재 이미지 데이터를 저장할 변수
+        let currentImageForPreview = null; // { bytes: Uint8Array, width: number, height: number } 형태로 저장
+
+        // ---- Helper Functions ----
+
+
+        // 바이트 단위를 읽기 쉬운 형태로 변환하는 함수 (KB, MB 등)
+        function formatBytes(bytes, decimals = 2) {
+            if (bytes === 0) return '0 Bytes';
+
+            const k = 1024;
+            const dm = decimals < 0 ? 0 : decimals;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+        }
+
+        // 이미지 미리보기 용량을 업데이트하는 함수 (추가 시작)
+        async function updatePreviewDisplay() {
+            if (!currentImageForPreview) {
+                originalSizeDisplay.textContent = 'N/A';
+                previewSizeDisplay.textContent = 'N/A';
+                return;
+            }
+
+            const { bytes, width, height } = currentImageForPreview;
+            const resizePercentage = parseInt(resizePercentageInput.value, 10);
+            const quality = parseInt(qualityInput.value, 10);
+
+            originalSizeDisplay.textContent = formatBytes(bytes.byteLength);
+
+            try {
+                // 실제 최적화 로직을 미리보기 계산에 재활용
+                const previewBytes = await optimizeImage(bytes, width, height, resizePercentage, quality);
+                previewSizeDisplay.textContent = formatBytes(previewBytes.byteLength);
+            } catch (error) {
+                console.error("Preview optimization failed:", error);
+                previewSizeDisplay.textContent = 'Error';
+            }
+        }
+
+        // 슬라이더 값 표시 툴팁 위치를 업데이트하는 함수
+        function updateSliderTooltipPosition(slider, tooltip) {
+            const value = (slider.value - slider.min) / (slider.max - slider.min);
+            // 핸들 중앙에 툴팁이 오도록 여백 계산. 핸들 너비 20px
+            const thumbWidth = 20;
+            const trackWidth = slider.offsetWidth;
+            const thumbPosition = (value * (trackWidth - thumbWidth)) + (thumbWidth / 2); 
+
+            tooltip.style.left = `${thumbPosition}px`;
+            // 슬라이더 채워지는 부분 색상 업데이트
+            slider.style.setProperty('--slider-fill-percentage', `${value * 100}%`);
+        }
+
+        // 슬라이더와 입력 필드, 퀵 버튼을 동기화하는 함수
+        function updateValue(type, value) {
+            let inputElement, sliderElement, sliderValueElement, quickButtonsContainer;
+            if (type === 'resize') {
+                inputElement = resizePercentageInput;
+                quickButtonsContainer = resizeQuickButtons;
+            } else if (type === 'quality') {
+                inputElement = qualityInput;
+                sliderElement = qualitySlider;
+                sliderValueElement = qualitySliderValue;
+            }
+
+            // qualitySlider에만 슬라이더 값이 있으므로 sliderElement가 정의되었을 때만 처리
+            if (sliderElement) {
+                const min = parseInt(sliderElement.min, 10);
+                const max = parseInt(sliderElement.max, 10);
+                value = Math.max(min, Math.min(max, value));
+
+                inputElement.value = value;
+                sliderElement.value = value;
+                sliderValueElement.textContent = `${value}${type === 'resize' ? '' : ''}`; // 퀄리티는 % 기호 없음
+
+                // 툴팁 위치 업데이트
+                updateSliderTooltipPosition(sliderElement, sliderValueElement);
+            } else { // resize는 슬라이더가 없으므로 input만 업데이트
+                 const min = parseInt(inputElement.min, 10);
+                 const max = parseInt(inputElement.max, 10);
+                 value = Math.max(min, Math.min(max, value));
+                 inputElement.value = value;
+            }
+
+
+            // 퀵 버튼 활성화 상태 업데이트 (resize에만 해당)
+            if (type === 'resize' && quickButtonsContainer) {
+                Array.from(quickButtonsContainer.children).forEach(button => {
+                    if (parseInt(button.dataset.value, 10) === value) {
+                        button.classList.add('active'); // CSS에서 active 스타일 처리
+                    } else {
+                        button.classList.remove('active');
+                    }
+                });
+            }
+
+            // 값이 변경될 때마다 미리보기 업데이트 요청 (수정)
+            updatePreviewDisplay();
+        }
+
+        // ---- Event Listeners ----
+
+        // Resize Percentage (Input, Buttons)
+        resizePercentageInput.addEventListener('input', (e) => updateValue('resize', parseInt(e.target.value, 10)));
+        resizeUpBtn.addEventListener('click', () => updateValue('resize', parseInt(resizePercentageInput.value, 10) + 1));
+        resizeDownBtn.addEventListener('click', () => updateValue('resize', parseInt(resizePercentageInput.value, 10) - 1));
+        resizeQuickButtons.addEventListener('click', (e) => {
+            if (e.target.tagName === 'BUTTON') {
+                updateValue('resize', parseInt(e.target.dataset.value, 10));
+            }
+        });
+
+        // Quality (Input, Slider)
+        qualityInput.addEventListener('input', (e) => updateValue('quality', parseInt(e.target.value, 10)));
+        qualitySlider.addEventListener('input', (e) => updateValue('quality', parseInt(e.target.value, 10)));
+        // 초기 로드 시 툴팁 위치 및 채워지는 색상 설정
+        new ResizeObserver(() => updateSliderTooltipPosition(qualitySlider, qualitySliderValue)).observe(qualitySlider);
+
+
+        // Initial update for slider values and tooltip positions
+        // 시작 시 resizePercentageInput과 qualityInput 값에 따라 퀵 버튼 및 슬라이더 동기화
+        updateValue('resize', parseInt(resizePercentageInput.value, 10));
+        updateValue('quality', parseInt(qualityInput.value, 10));
+
+
+        // Main action buttons
+        optimizeButton.onclick = () => {
+            const resizePercentage = parseInt(resizePercentageInput.value, 10);
+            const quality = parseInt(qualityInput.value, 10);
+
+            parent.postMessage({ pluginMessage: { 
+                type: 'optimize-images',
+                resizePercentage,
+                quality
+            }}, '*');
+        };
+
+        // Initial update for slider values and tooltip positions
+        // 시작 시 resizePercentageInput과 qualityInput 값에 따라 퀵 버튼 및 슬라이더 동기화
+        updateValue('resize', parseInt(resizePercentageInput.value, 10));
+        updateValue('quality', parseInt(qualityInput.value, 10));
+        // 플러그인 로드 시 초기 미리보기 표시 (code.ts에서 첫 이미지 데이터를 보내줄 것임) (추가)
+        updatePreviewDisplay(); 
+
+
+        // 'Export to Current Frame' 및 'Export to External Folder' 버튼 로직은 제거되었습니다.
+
+        // Figma 코드로부터 메시지를 수신하는 리스너
+        window.onmessage = async (event) => {
+            const { type, imageBytes, imageNodeId, resizePercentage, quality, width, height, fileName } = event.data.pluginMessage;
+
+            // 선택된 이미지 데이터 수신 핸들러 (추가된 부분 시작)
+            if (type === 'selection-image-data') {
+                console.log(`UI: 선택된 이미지 데이터 수신 (Node ID: ${imageNodeId}), ${imageBytes ? imageBytes.byteLength : 0} 바이트`);
+                // imageBytes가 null일 수 있으므로 체크
+                if (imageBytes) {
+                    // currentImageForPreview는 스크립트 상단에 선언된 전역 변수여야 합니다.
+                    currentImageForPreview = { bytes: new Uint8Array(imageBytes), width, height };
+                } else {
+                    currentImageForPreview = null; // 선택 해제 시 미리보기 데이터 초기화
+                }
+                // updatePreviewDisplay()는 스크립트 내부에 정의된 미리보기 업데이트 함수여야 합니다.
+                updatePreviewDisplay(); // 새 이미지 데이터로 미리보기 업데이트
+            }
+            // (추가된 부분 끝)
+            else if (type === 'process-image-data' || type === 'process-image-data-for-export') {
+                console.log(`UI: 이미지 데이터 수신 (Node ID: ${imageNodeId}), ${imageBytes.byteLength} 바이트, 타입: ${type}`);
+                
+                const originalSize = imageBytes.byteLength;
+
+                try {
+                    // optimizeImage()는 스크립트 내부에 정의된 함수여야 합니다.
+                    const optimizedBytes = await optimizeImage(imageBytes, width, height, resizePercentage, quality);
+                    
+                    console.log(`UI: 이미지 처리 완료, 최적화된 바이트 크기: ${optimizedBytes.byteLength}`);
+                    
+                    if (type === 'process-image-data') {
+                        parent.postMessage({ pluginMessage: { 
+                            type: 'image-optimization-complete',
+                            imageNodeId: imageNodeId,
+                            optimizedBytes: optimizedBytes.buffer,
+                            originalSize: originalSize 
+                        }}, '*');
+                    } else if (type === 'process-image-data-for-export') {
+                        parent.postMessage({ pluginMessage: { 
+                            type: 'image-export-complete',
+                            imageNodeId: imageNodeId,
+                            optimizedBytes: optimizedBytes.buffer,
+                            originalSize: originalSize
+                        }}, '*');
+                    }
+
+                } catch (error) {
+                    console.error(`UI: 이미지 처리 중 오류 발생 (Node ID: ${imageNodeId}):`, error);
+                    if (type === 'process-image-data') {
+                        parent.postMessage({ pluginMessage: { 
+                            type: 'image-optimization-failed',
+                            imageNodeId: imageNodeId,
+                            error: error.message
+                        }}, '*');
+                    } else if (type === 'process-image-data-for-export') {
+                        parent.postMessage({ pluginMessage: { 
+                            type: 'image-export-failed',
+                            imageNodeId: imageNodeId,
+                            error: error.message
+                        }}, '*');
+                    }
+                }
+
+            } else if (type === 'request-external-export') {
+                console.log(`UI: 외부 Export 요청 수신, ${imageBytes.byteLength} 바이트`);
+                // Note: 이 부분의 Export to Folder 버튼도 이미지에서 삭제되었지만,
+                // code.ts에서 여전히 이 메시지 타입을 처리할 수 있으므로 js 로직은 유지합니다.
+                // 다만, 버튼 클릭으로 직접 호출될 일은 없어집니다.
+                try {
+                    const optimizedBytes = await optimizeImage(imageBytes, width, height, resizePercentage, quality);
+                    
+                    console.log(`UI: 외부 Export 이미지 처리 완료, 최적화된 바이트 크기: ${optimizedBytes.byteLength}`);
+                    
+                    const blob = new Blob([optimizedBytes], { type: 'image/jpeg' });
+                    const url = URL.createObjectURL(blob);
+                    
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = fileName || 'optimized_image.jpg';
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+
+                    parent.postMessage({ pluginMessage: { 
+                        type: 'external-export-complete',
+                        fileName: fileName,
+                        originalSize: imageBytes.byteLength,
+                        optimizedSize: optimizedBytes.byteLength
+                    }}, '*');
+
+                } catch (error) {
+                    console.error(`UI: 외부 Export 중 오류 발생:`, error);
+                    parent.postMessage({ pluginMessage: { 
+                        type: 'external-export-failed',
+                        error: error.message,
+                        fileName: fileName
+                    }}, '*');
+                }
+            } else if (type === 'external-export-complete' || type === 'external-export-failed') {
+                console.log(`UI: Figma로부터 Export 결과 수신:`, event.data.pluginMessage);
+            }
+        };
+
+        // OffscreenCanvas를 사용하여 이미지 리사이즈 및 압축 함수 (로직 변경 없음)
+        async function optimizeImage(originalBytes, originalWidth, originalHeight, resizePercentage, quality) {
+            const blob = new Blob([originalBytes]);
+            const imageUrl = URL.createObjectURL(blob);
+
+            return new Promise((resolve, reject) => {
+                const img = new Image();
+                img.onload = () => {
+                    URL.revokeObjectURL(imageUrl); 
+
+                    const newWidth = Math.floor(originalWidth * (resizePercentage / 100));
+                    const newHeight = Math.floor(originalHeight * (resizePercentage / 100));
+
+                    const offscreen = new OffscreenCanvas(newWidth, newHeight);
+                    const ctx = offscreen.getContext('2d', { willReadFrequently: true }); // 성능 최적화 옵션 유지
+                    if (!ctx) {
+                        return reject(new Error("OffscreenCanvas 2D context not supported."));
+                    }
+                    
+                    ctx.imageSmoothingEnabled = true;
+                    ctx.imageSmoothingQuality = 'high';
+
+                    ctx.drawImage(img, 0, 0, newWidth, newHeight);
+
+                    offscreen.convertToBlob({ 
+                        type: 'image/jpeg', 
+                        quality: quality / 100 
+                    }).then(optimizedBlob => {
+                        optimizedBlob.arrayBuffer().then(buffer => {
+                            resolve(new Uint8Array(buffer));
+                        }).catch(reject);
+                    }).catch(reject);
+                };
+                img.onerror = (e) => {
+                    URL.revokeObjectURL(imageUrl); 
+                    reject(new Error("Failed to load image for optimization."));
+                };
+                img.src = imageUrl;
+            });
+        }
+    </script>
+</body>
+</html>
