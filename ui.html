@@ -690,398 +690,403 @@
             </div>
     </div>
 
-<script>
-    // UI 요소들을 가져옵니다.
-    const resizePercentageInput = document.getElementById('resize-percentage-input');
-    const resizeUpBtn = document.getElementById('resize-up-btn');
-    const resizeDownBtn = document.getElementById('resize-down-btn');
-    const resizeQuickButtons = document.getElementById('resize-quick-buttons');
+    <script>
+        // UI 요소들을 가져옵니다.
+        const resizePercentageInput = document.getElementById('resize-percentage-input');
+        const resizeUpBtn = document.getElementById('resize-up-btn');
+        const resizeDownBtn = document.getElementById('resize-down-btn');
+        const resizeQuickButtons = document.getElementById('resize-quick-buttons');
 
-    const qualityInput = document.getElementById('quality-input');
-    const qualitySlider = document.getElementById('quality-slider');
-    const qualitySliderValue = document.getElementById('quality-slider-value');
+        const qualityInput = document.getElementById('quality-input');
+        const qualitySlider = document.getElementById('quality-slider');
+        const qualitySliderValue = document.getElementById('quality-slider-value');
 
-    const optimizeButton = document.getElementById('optimize-button');
-    const previewListContainer = document.getElementById('preview-list-container');
-    let selectedImagesData = new Map();
+        const optimizeButton = document.getElementById('optimize-button');
+        const previewListContainer = document.getElementById('preview-list-container');
+        // selectedImagesData Map의 키를 nodeId_imageHash로 변경 (고유성 확보)
+        let selectedImagesData = new Map(); // key: nodeId_imageHash, value: { bytes, width, height, type, name, url, imageHash, nodeId }
 
-    const fileFormatOptions = document.getElementById('file-format-options');
+        const fileFormatOptions = document.getElementById('file-format-options');
 
-    let selectedFileFormats = ['PNG'];
+        let selectedFileFormats = ['PNG']; 
 
-    document.querySelectorAll('.file-format-option').forEach(button => {
-        if (button.dataset.format === 'PNG') {
-            button.classList.add('active');
-        } else {
-            button.classList.remove('active');
-        }
-    });
-
-    let selectedImageCount = 0;
-
-    // ★★★ 변경: UI 높이 조절 로직 재정의 - 비동기 재측정 포함 ★★★
-    function resizeUiToContentHeight() {
-        window.requestAnimationFrame(() => {
-            const wrapElement = document.querySelector('.wrap');
-            if (wrapElement) {
-                const contentHeight = wrapElement.scrollHeight;
-                const currentWidth = 300;
-                parent.postMessage({ pluginMessage: { type: 'resize-ui', width: currentWidth, height: contentHeight } }, '*');
-                console.log(`[ui.html] UI 높이 조절 요청: ${currentWidth}x${contentHeight} (최종 계산)`);
+        document.querySelectorAll('.file-format-option').forEach(button => {
+            if (button.dataset.format === 'PNG') {
+                button.classList.add('active');
+            } else {
+                button.classList.remove('active');
             }
         });
-    }
 
-    // ★★★ 추가: 미리보기 컨테이너의 높이가 0이 될 때까지 기다리는 함수 ★★★
-    function waitForContainerToCollapseAndResize() {
-        const checkHeight = () => {
-            const containerHeight = previewListContainer.scrollHeight;
-            console.log(`[ui.html] Checking container height: ${containerHeight}px`);
-            if (containerHeight <= 1) { // 높이가 거의 0에 가까워지면
-                console.log('[ui.html] Container collapsed. Resizing UI...');
+        let selectedImageCount = 0;
+
+        // UI 콘텐츠의 높이를 계산하고 code.ts로 전송하는 함수
+        function resizeUiToContentHeight() {
+            window.requestAnimationFrame(() => {
+                const wrapElement = document.querySelector('.wrap');
+                if (wrapElement) {
+                    const contentHeight = wrapElement.scrollHeight;
+                    const currentWidth = 300; 
+                    parent.postMessage({ pluginMessage: { type: 'resize-ui', width: currentWidth, height: contentHeight } }, '*');
+                    console.log(`[ui.html] UI 높이 조절 요청: ${currentWidth}x${contentHeight} (스크롤 높이 기준)`);
+                }
+            });
+        }
+
+        // 바이트 단위를 읽기 쉬운 형태로 변환하는 함수 (KB, MB 등)
+        function formatBytes(bytes, decimals = 2) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const dm = decimals < 0 ? 0 : decimals;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+        }
+
+        // OffscreenCanvas를 사용하여 이미지 리사이즈 및 압축 함수
+        async function optimizeImage(originalBytes, originalWidth, originalHeight, resizePercentage, quality, targetFormat = 'JPG') {
+            const blob = new Blob([originalBytes]);
+            const imageUrl = URL.createObjectURL(blob);
+
+            return new Promise((resolve, reject) => {
+                const img = new Image();
+                img.onload = () => {
+                    URL.revokeObjectURL(imageUrl);
+                    let newWidth = Math.floor(originalWidth * (resizePercentage / 100));
+                    let newHeight = Math.floor(originalHeight * (resizePercentage / 100));
+
+                    const offscreen = new OffscreenCanvas(newWidth, newHeight);
+                    const ctx = offscreen.getContext('2d', { alpha: true, willReadFrequently: true });
+                    if (!ctx) {
+                        return reject(new Error("OffscreenCanvas 2D context not supported."));
+                    }
+                    
+                    ctx.clearRect(0, 0, newWidth, newHeight);
+                    ctx.imageSmoothingEnabled = true;
+                    ctx.imageSmoothingQuality = 'high';
+                    ctx.drawImage(img, 0, 0, newWidth, newHeight);
+
+                    let mimeType;
+                    let qualityOption = quality / 100;
+                    switch (targetFormat.toUpperCase()) {
+                        case 'PNG': mimeType = 'image/png'; qualityOption = undefined; break;
+                        case 'WEBP': mimeType = 'image/webp'; break;
+                        case 'JPG': mimeType = 'image/jpeg'; break;
+                        default: mimeType = 'image/png'; qualityOption = undefined; break;
+                    }
+
+                    offscreen.convertToBlob({ type: mimeType, quality: qualityOption })
+                        .then(optimizedBlob => optimizedBlob.arrayBuffer().then(buffer => resolve(new Uint8Array(buffer))))
+                        .catch(reject);
+                };
+                img.onerror = (e) => { URL.revokeObjectURL(imageUrl); reject(new Error(`Failed to load image for optimization: ${e.message || 'unknown error'}`)); };
+                img.src = imageUrl;
+            });
+        }
+
+        async function updateAllImagePreviews() {
+            console.log('[ui.html] updateAllImagePreviews 호출됨');
+            
+            // 기존 목록을 비우기 전에, 현재 Map에 있는 데이터의 ID 목록을 가져옵니다.
+            const existingNodeIds = new Set(Array.from(previewListContainer.children).map(el => el.dataset.nodeId));
+            
+            // UI를 완전히 비웁니다.
+            previewListContainer.innerHTML = ''; 
+            
+            const resizePercentage = parseInt(resizePercentageInput.value, 10);
+            const quality = parseInt(qualityInput.value, 10);
+            const previewFormat = selectedFileFormats[0];
+
+            const finalImagesToDisplay = Array.from(selectedImagesData.values());
+            
+            if (finalImagesToDisplay.length === 0) {
                 resizeUiToContentHeight(); // 높이 조절
+                return;
+            }
+            
+            // Map에 있는 데이터를 기준으로 UI를 다시 그립니다.
+            for (const imageData of finalImagesToDisplay) {
+                const previewItem = document.createElement('div');
+                previewItem.classList.add('preview-item');
+                // node.id를 데이터셋에 저장하여 고유 식별자로 사용합니다.
+                previewItem.dataset.nodeId = imageData.nodeId;
+                
+                const thumbnail = document.createElement('img');
+                thumbnail.classList.add('image-thumbnail');
+                thumbnail.src = imageData.url;
+                thumbnail.alt = imageData.name;
+
+                const infoDiv = document.createElement('div');
+                infoDiv.classList.add('info');
+
+                const nameDiv = document.createElement('div');
+                nameDiv.classList.add('image-name');
+                nameDiv.textContent = imageData.name;
+
+                const sizeInfoDiv = document.createElement('div');
+                sizeInfoDiv.classList.add('size-info');
+                
+                const originalSizeSpan = document.createElement('span');
+                originalSizeSpan.classList.add('original-size');
+                originalSizeSpan.textContent = formatBytes(imageData.bytes.byteLength);
+
+                const arrowSpan = document.createElement('span');
+                arrowSpan.classList.add('arrow');
+                arrowSpan.textContent = '▶';
+
+                const optimizedSizeSpan = document.createElement('span');
+                optimizedSizeSpan.classList.add('optimized-size');
+                
+                const spinner = document.createElement('div');
+                spinner.classList.add('loading-spinner');
+                optimizedSizeSpan.appendChild(spinner);
+
+                sizeInfoDiv.appendChild(originalSizeSpan);
+                sizeInfoDiv.appendChild(arrowSpan);
+                sizeInfoDiv.appendChild(optimizedSizeSpan);
+
+                infoDiv.appendChild(nameDiv);
+                infoDiv.appendChild(sizeInfoDiv);
+
+                previewItem.appendChild(thumbnail);
+                previewItem.appendChild(infoDiv);
+                previewListContainer.appendChild(previewItem);
+                
+                // 비동기 이미지 최적화 및 사이즈 업데이트
+                optimizeImage(imageData.bytes, imageData.width, imageData.height, resizePercentage, quality, previewFormat)
+                    .then(optimizedBytes => {
+                        optimizedSizeSpan.textContent = formatBytes(optimizedBytes.byteLength);
+                    })
+                    .catch(error => {
+                        console.error(`[ui.html] 이미지 미리보기 최적화 실패 (Node ID: ${imageData.nodeId}, Hash: ${imageData.imageHash}):`, error);
+                        optimizedSizeSpan.textContent = 'Error';
+                        optimizedSizeSpan.style.color = '#ff6b6b';
+                    });
+            }
+            
+            resizeUiToContentHeight(); // 높이 조절
+        }
+
+        // 슬라이더 값 표시 툴팁 위치를 업데이트하는 함수
+        function updateSliderTooltipPosition(slider, tooltip) {
+            const value = (slider.value - slider.min) / (slider.max - slider.min);
+            const thumbWidth = 20;
+            const trackWidth = slider.offsetWidth;
+            const thumbPosition = (value * (trackWidth - thumbWidth)) + (thumbWidth / 2);
+
+            tooltip.style.left = `${thumbPosition}px`;
+            slider.style.setProperty('--slider-fill-percentage', `${value * 100}%`);
+        }
+
+        // 슬라이더와 입력 필드, 퀵 버튼을 동기화하는 함수
+        function updateValue(type, value) {
+            let inputElement, sliderElement, sliderValueElement, quickButtonsContainer;
+            if (type === 'resize') {
+                inputElement = resizePercentageInput;
+                quickButtonsContainer = resizeQuickButtons;
+            } else if (type === 'quality') {
+                inputElement = qualityInput;
+                sliderElement = qualitySlider;
+                sliderValueElement = qualitySliderValue;
+            }
+
+            if (sliderElement) {
+                const min = parseInt(sliderElement.min, 10);
+                const max = parseInt(sliderElement.max, 10);
+                value = Math.max(min, Math.min(max, value));
+                inputElement.value = value;
+                sliderElement.value = value;
+                sliderValueElement.textContent = `${value}`;
+                updateSliderTooltipPosition(sliderElement, sliderValueElement);
             } else {
-                // 아직 높이가 남아있다면, 다시 확인
-                window.requestAnimationFrame(() => {
-                    setTimeout(checkHeight, 50); // 50ms 후 재시도
+                const min = parseInt(inputElement.min, 10);
+                const max = parseInt(inputElement.max, 10);
+                value = Math.max(min, Math.min(max, value));
+                inputElement.value = value;
+            }
+
+            if (type === 'resize' && quickButtonsContainer) {
+                Array.from(quickButtonsContainer.children).forEach(button => {
+                    if (parseInt(button.dataset.value, 10) === value) {
+                        button.classList.add('active');
+                    } else {
+                        button.classList.remove('active');
+                    }
                 });
             }
-        };
-        checkHeight();
-    }
-    
-    // 바이트 단위를 읽기 쉬운 형태로 변환하는 함수 (KB, MB 등)
-    function formatBytes(bytes, decimals = 2) {
-        if (bytes === 0) return '0 Bytes';
-        const k = 1024;
-        const dm = decimals < 0 ? 0 : decimals;
-        const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
-        const i = Math.floor(Math.log(bytes) / Math.log(k));
-        return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
-    }
-
-    // OffscreenCanvas를 사용하여 이미지 리사이즈 및 압축 함수
-    async function optimizeImage(originalBytes, originalWidth, originalHeight, resizePercentage, quality, targetFormat = 'JPG') {
-        const blob = new Blob([originalBytes]);
-        const imageUrl = URL.createObjectURL(blob);
-
-        return new Promise((resolve, reject) => {
-            const img = new Image();
-            img.onload = () => {
-                URL.revokeObjectURL(imageUrl);
-                let newWidth = Math.floor(originalWidth * (resizePercentage / 100));
-                let newHeight = Math.floor(originalHeight * (resizePercentage / 100));
-
-                const offscreen = new OffscreenCanvas(newWidth, newHeight);
-                const ctx = offscreen.getContext('2d', { alpha: true, willReadFrequently: true });
-                if (!ctx) {
-                    return reject(new Error("OffscreenCanvas 2D context not supported."));
-                }
-                
-                ctx.clearRect(0, 0, newWidth, newHeight);
-                ctx.imageSmoothingEnabled = true;
-                ctx.imageSmoothingQuality = 'high';
-                ctx.drawImage(img, 0, 0, newWidth, newHeight);
-
-                let mimeType;
-                let qualityOption = quality / 100;
-                switch (targetFormat.toUpperCase()) {
-                    case 'PNG': mimeType = 'image/png'; qualityOption = undefined; break;
-                    case 'WEBP': mimeType = 'image/webp'; break;
-                    case 'JPG': mimeType = 'image/jpeg'; break;
-                    default: mimeType = 'image/png'; qualityOption = undefined; break;
-                }
-
-                offscreen.convertToBlob({ type: mimeType, quality: qualityOption })
-                    .then(optimizedBlob => optimizedBlob.arrayBuffer().then(buffer => resolve(new Uint8Array(buffer))))
-                    .catch(reject);
-            };
-            img.onerror = (e) => { URL.revokeObjectURL(imageUrl); reject(new Error(`Failed to load image for optimization: ${e.message || 'unknown error'}`)); };
-            img.src = imageUrl;
-        });
-    }
-
-    async function updateAllImagePreviews() {
-        console.log('[ui.html] updateAllImagePreviews 호출됨');
-        
-        // 미리보기 목록 컨테이너 비우기
-        previewListContainer.innerHTML = '';
-        
-        const resizePercentage = parseInt(resizePercentageInput.value, 10);
-        const quality = parseInt(qualityInput.value, 10);
-        const previewFormat = selectedFileFormats[0];
-
-        if (selectedImagesData.size === 0) {
-            // 이미지가 없으면 컨테이너를 비우고 높이 조절
-            resizeUiToContentHeight(); 
-            return;
-        }
-
-        for (const [nodeId, imageData] of selectedImagesData.entries()) {
-            const previewItem = document.createElement('div');
-            previewItem.classList.add('preview-item');
-            previewItem.dataset.nodeId = nodeId;
-
-            const thumbnail = document.createElement('img');
-            thumbnail.classList.add('image-thumbnail');
-            thumbnail.src = imageData.url;
-            thumbnail.alt = imageData.name;
-
-            const infoDiv = document.createElement('div');
-            infoDiv.classList.add('info');
-
-            const nameDiv = document.createElement('div');
-            nameDiv.classList.add('image-name');
-            nameDiv.textContent = imageData.name;
-
-            const sizeInfoDiv = document.createElement('div');
-            sizeInfoDiv.classList.add('size-info');
-            
-            const originalSizeSpan = document.createElement('span');
-            originalSizeSpan.classList.add('original-size');
-            originalSizeSpan.textContent = formatBytes(imageData.bytes.byteLength);
-
-            const arrowSpan = document.createElement('span');
-            arrowSpan.classList.add('arrow');
-            arrowSpan.textContent = '▶';
-
-            const optimizedSizeSpan = document.createElement('span');
-            optimizedSizeSpan.classList.add('optimized-size');
-            
-            const spinner = document.createElement('div');
-            spinner.classList.add('loading-spinner');
-            optimizedSizeSpan.appendChild(spinner);
-
-            sizeInfoDiv.appendChild(originalSizeSpan);
-            sizeInfoDiv.appendChild(arrowSpan);
-            sizeInfoDiv.appendChild(optimizedSizeSpan);
-
-            infoDiv.appendChild(nameDiv);
-            infoDiv.appendChild(sizeInfoDiv);
-
-            previewItem.appendChild(thumbnail);
-            previewItem.appendChild(infoDiv);
-            previewListContainer.appendChild(previewItem);
-            
-            // 비동기적으로 최적화 용량 계산
-            try {
-                const optimizedBytes = await optimizeImage(imageData.bytes, imageData.width, imageData.height, resizePercentage, quality, previewFormat);
-                optimizedSizeSpan.textContent = formatBytes(optimizedBytes.byteLength);
-            } catch (error) {
-                console.error(`[ui.html] 이미지 미리보기 최적화 실패 (Node ID: ${nodeId}):`, error);
-                optimizedSizeSpan.textContent = 'Error';
-                optimizedSizeSpan.style.color = '#ff6b6b';
-            }
-        }
-        
-        // 모든 미리보기 항목이 추가된 후에 높이를 다시 조절
-        resizeUiToContentHeight();
-    }
-
-    // 슬라이더 값 표시 툴팁 위치를 업데이트하는 함수
-    function updateSliderTooltipPosition(slider, tooltip) {
-        const value = (slider.value - slider.min) / (slider.max - slider.min);
-        const thumbWidth = 20;
-        const trackWidth = slider.offsetWidth;
-        const thumbPosition = (value * (trackWidth - thumbWidth)) + (thumbWidth / 2);
-
-        tooltip.style.left = `${thumbPosition}px`;
-        slider.style.setProperty('--slider-fill-percentage', `${value * 100}%`);
-    }
-
-    // 슬라이더와 입력 필드, 퀵 버튼을 동기화하는 함수
-    function updateValue(type, value) {
-        let inputElement, sliderElement, sliderValueElement, quickButtonsContainer;
-        if (type === 'resize') {
-            inputElement = resizePercentageInput;
-            quickButtonsContainer = resizeQuickButtons;
-        } else if (type === 'quality') {
-            inputElement = qualityInput;
-            sliderElement = qualitySlider;
-            sliderValueElement = qualitySliderValue;
-        }
-
-        if (sliderElement) {
-            const min = parseInt(sliderElement.min, 10);
-            const max = parseInt(sliderElement.max, 10);
-            value = Math.max(min, Math.min(max, value));
-            inputElement.value = value;
-            sliderElement.value = value;
-            sliderValueElement.textContent = `${value}`;
-            updateSliderTooltipPosition(sliderElement, sliderValueElement);
-        } else {
-             const min = parseInt(inputElement.min, 10);
-             const max = parseInt(inputElement.max, 10);
-             value = Math.max(min, Math.min(max, value));
-             inputElement.value = value;
-        }
-
-        if (type === 'resize' && quickButtonsContainer) {
-            Array.from(quickButtonsContainer.children).forEach(button => {
-                if (parseInt(button.dataset.value, 10) === value) {
-                    button.classList.add('active');
-                } else {
-                    button.classList.remove('active');
-                }
-            });
-        }
-        updateAllImagePreviews();
-    }
-
-    // 선택된 이미지 개수 업데이트 및 버튼 텍스트 변경
-    function updateOptimizeButtonText() {
-        if (selectedImageCount > 0) {
-            optimizeButton.textContent = `선택한 이미지 (${selectedImageCount})`;
-        } else {
-            optimizeButton.textContent = '이미지를 선택해 주세요';
-        }
-    }
-    
-    // --- 함수 정의 끝 ---
-
-    // --- 이벤트 리스너 시작 ---
-
-    // 초기 로드 시 높이 조절
-    window.addEventListener('load', () => {
-        resizeUiToContentHeight();
-    });
-    
-    // MutationObserver를 제거하고 필요한 시점에만 높이 조절 함수를 호출합니다.
-    const observer = new MutationObserver(resizeUiToContentHeight);
-    observer.observe(document.querySelector('.wrap'), { childList: true, subtree: true, attributes: true });
-
-    // File Format Selection
-    fileFormatOptions.addEventListener('click', (e) => {
-        if (e.target.tagName === 'BUTTON') {
-            const clickedFormat = e.target.dataset.format;
-            
-            document.querySelectorAll('.file-format-option').forEach(button => {
-                button.classList.remove('active');
-            });
-            e.target.classList.add('active');
-            
-            selectedFileFormats = [clickedFormat];
-            updateAllImagePreviews();
-        }
-    });
-
-    // Resize Percentage (Input, Buttons)
-    resizePercentageInput.addEventListener('input', (e) => updateValue('resize', parseInt(e.target.value, 10)));
-    resizeUpBtn.addEventListener('click', () => updateValue('resize', parseInt(resizePercentageInput.value, 10) + 1));
-    resizeDownBtn.addEventListener('click', () => updateValue('resize', parseInt(resizePercentageInput.value, 10) - 1));
-    resizeQuickButtons.addEventListener('click', (e) => {
-        if (e.target.tagName === 'BUTTON') {
-            updateValue('resize', parseInt(e.target.dataset.value, 10));
-        }
-    });
-
-    // Quality (Input, Slider)
-    qualityInput.addEventListener('input', (e) => updateValue('quality', parseInt(e.target.value, 10)));
-    qualitySlider.addEventListener('input', (e) => updateValue('quality', parseInt(e.target.value, 10)));
-    new ResizeObserver(() => updateSliderTooltipPosition(qualitySlider, qualitySliderValue)).observe(qualitySlider);
-
-    // Main action buttons
-    optimizeButton.onclick = () => {
-        if (selectedImageCount === 0) {
-            parent.postMessage({ pluginMessage: { type: 'notify', message: 'Please select at least one image to optimize.' } }, '*');
-            return;
-        }
-        if (selectedFileFormats.length === 0) {
-             parent.postMessage({ pluginMessage: { type: 'notify', message: 'Please select at least one file format for optimization.' } }, '*');
-             return;
-        }
-        const resizePercentage = parseInt(resizePercentageInput.value, 10);
-        const quality = parseInt(qualityInput.value, 10);
-
-        parent.postMessage({ pluginMessage: {
-            type: 'optimize-images',
-            resizePercentage,
-            quality,
-            fileFormats: selectedFileFormats
-        }}, '*');
-    };
-
-    // 초기 동기화
-    updateValue('resize', parseInt(resizePercentageInput.value, 10));
-    updateValue('quality', parseInt(qualityInput.value, 10));
-    updateOptimizeButtonText();
-
-    // Figma 코드로부터 메시지를 수신하는 리스너
-    window.onmessage = async (event) => {
-        const { type, imagesData, selectedNodeCount, ...rest } = event.data.pluginMessage;
-        
-        console.log(`[ui.html] Figma로부터 메시지 수신 - Type: ${type}`);
-        
-        if (type === 'trigger-download') {
-            const { fileName, bytes: downloadedBytes, originalSize, optimizedSize } = event.data.pluginMessage;
-            const blob = new Blob([downloadedBytes]);
-            const downloadUrl = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = downloadUrl;
-            a.download = fileName;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(downloadUrl);
-
-            parent.postMessage({ pluginMessage: { type: 'external-export-complete', fileName, originalSize, optimizedSize } }, '*');
-            return;
-        }
-        
-        else if (type === 'selection-image-data-batch') {
-            selectedImagesData.clear();
-            if (imagesData && imagesData.length > 0) {
-                imagesData.forEach(img => selectedImagesData.set(img.nodeId, {
-                    bytes: new Uint8Array(img.imageBytes),
-                    width: img.width,
-                    height: img.height,
-                    type: img.fileType,
-                    name: img.name,
-                    url: img.url
-                }));
-            }
+            // 슬라이더/입력값 변경 시에도 프리뷰를 업데이트합니다.
             updateAllImagePreviews();
         }
 
-        else if (type === 'selection-change') {
-            selectedImageCount = selectedNodeCount;
-            updateOptimizeButtonText();
-            if (selectedNodeCount === 0) {
-                // ★★★ 변경: 컨테이너를 비우고, 높이가 0이 될 때까지 기다리는 함수를 호출 ★★★
-                previewListContainer.innerHTML = '';
-                waitForContainerToCollapseAndResize(); // 재측정 재시도 로직 호출
+        // 선택된 이미지 개수 업데이트 및 버튼 텍스트 변경
+        function updateOptimizeButtonText() {
+            if (selectedImageCount > 0) {
+                optimizeButton.textContent = `선택한 이미지 (${selectedImageCount})`;
             } else {
-                 parent.postMessage({ pluginMessage: { type: 'request-all-image-data' } }, '*');
+                optimizeButton.textContent = '이미지를 선택해 주세요';
             }
         }
         
-        else if (type === 'process-image-data') {
-            const { imageNodeId, imageBytes, resizePercentage, quality, width, height, fileType: originalFileType } = event.data.pluginMessage;
-            const imgOriginalSize = imageBytes.byteLength;
-            
-            try {
-                const targetFormatForOptimization = selectedFileFormats[0]; 
-                const optimizedBytes = await optimizeImage(imageBytes, width, height, resizePercentage, quality, targetFormatForOptimization);
+        // --- 함수 정의 끝 ---
+
+        // --- 이벤트 리스너 시작 ---
+
+        // 초기 로드 시 높이 조절
+        window.addEventListener('load', () => {
+            resizeUiToContentHeight();
+        });
+        
+        // DOM 변화를 감지하여 높이를 자동으로 조절
+        const observer = new MutationObserver(resizeUiToContentHeight);
+        observer.observe(document.querySelector('.wrap'), { childList: true, subtree: true, attributes: true });
+
+        // File Format Selection
+        fileFormatOptions.addEventListener('click', (e) => {
+            if (e.target.tagName === 'BUTTON') {
+                const clickedFormat = e.target.dataset.format;
                 
-                parent.postMessage({ pluginMessage: {
-                    type: 'image-optimization-complete',
-                    imageNodeId: imageNodeId,
-                    optimizedBytes: optimizedBytes.buffer,
-                    originalSize: imgOriginalSize
-                }}, '*');
-            } catch (error) {
-                parent.postMessage({ pluginMessage: {
-                    type: 'image-optimization-failed',
-                    imageNodeId: imageNodeId,
-                    error: error.message
-                }}, '*');
+                document.querySelectorAll('.file-format-option').forEach(button => {
+                    button.classList.remove('active');
+                });
+                e.target.classList.add('active');
+                
+                selectedFileFormats = [clickedFormat];
+                updateAllImagePreviews();
             }
-        }
-        
-        else if (type === 'notify') {
-            alert(event.data.pluginMessage.message);
-        }
-    };
-</script>
+        });
+
+        // Resize Percentage (Input, Buttons)
+        resizePercentageInput.addEventListener('input', (e) => updateValue('resize', parseInt(e.target.value, 10)));
+        resizeUpBtn.addEventListener('click', () => updateValue('resize', parseInt(resizePercentageInput.value, 10) + 1));
+        resizeDownBtn.addEventListener('click', () => updateValue('resize', parseInt(resizePercentageInput.value, 10) - 1));
+        resizeQuickButtons.addEventListener('click', (e) => {
+            if (e.target.tagName === 'BUTTON') {
+                updateValue('resize', parseInt(e.target.dataset.value, 10));
+            }
+        });
+
+        // Quality (Input, Slider)
+        qualityInput.addEventListener('input', (e) => updateValue('quality', parseInt(e.target.value, 10)));
+        qualitySlider.addEventListener('input', (e) => updateValue('quality', parseInt(e.target.value, 10)));
+        new ResizeObserver(() => updateSliderTooltipPosition(qualitySlider, qualitySliderValue)).observe(qualitySlider);
+
+        // Main action buttons
+        optimizeButton.onclick = () => {
+            if (selectedImageCount === 0) {
+                parent.postMessage({ pluginMessage: { type: 'notify', message: 'Please select at least one image to optimize.' } }, '*');
+                return;
+            }
+            if (selectedFileFormats.length === 0) {
+                parent.postMessage({ pluginMessage: { type: 'notify', message: 'Please select at least one file format for optimization.' } }, '*');
+                return;
+            }
+            const resizePercentage = parseInt(resizePercentageInput.value, 10);
+            const quality = parseInt(qualityInput.value, 10);
+
+            parent.postMessage({ pluginMessage: {
+                type: 'optimize-images',
+                resizePercentage,
+                quality,
+                fileFormats: selectedFileFormats
+            }}, '*');
+        };
+
+        // 초기 동기화
+        updateValue('resize', parseInt(resizePercentageInput.value, 10));
+        updateValue('quality', parseInt(qualityInput.value, 10));
+        updateOptimizeButtonText();
+
+        // Figma 코드로부터 메시지를 수신하는 리스너
+        window.onmessage = async (event) => {
+            const { type, imagesData, selectedNodeCount, ...rest } = event.data.pluginMessage;
+            
+            console.log(`[ui.html] Figma로부터 메시지 수신 - Type: ${type}`);
+            
+            if (type === 'trigger-download') {
+                const { fileName, bytes: downloadedBytes, originalSize, optimizedSize } = event.data.pluginMessage;
+                const blob = new Blob([downloadedBytes]);
+                const downloadUrl = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = downloadUrl;
+                a.download = fileName;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(downloadUrl);
+
+                parent.postMessage({ pluginMessage: { type: 'external-export-complete', fileName, originalSize, optimizedSize } }, '*');
+                return;
+            }
+            
+            else if (type === 'selection-image-data-batch') {
+                console.log(`[ui.html] 새로운 배치 데이터 수신. 총 ${imagesData ? imagesData.length : 0}개 이미지.`);
+                
+                // 기존 selectedImagesData Map을 완전히 초기화하고 새 데이터로 채웁니다.
+                selectedImagesData.clear();
+                
+                if (imagesData && imagesData.length > 0) {
+                    imagesData.forEach(img => {
+                        // 고유 키: nodeId + imageHash.
+                        // 동일한 이미지라도 다른 노드에 있으면 별개로 취급합니다.
+                        const uniqueKey = `${img.nodeId}_${img.imageHash}`; 
+                        
+                        selectedImagesData.set(uniqueKey, {
+                            bytes: new Uint8Array(img.imageBytes),
+                            width: img.width,
+                            height: img.height,
+                            type: img.fileType,
+                            name: img.name,
+                            url: img.url,
+                            imageHash: img.imageHash,
+                            nodeId: img.nodeId 
+                        });
+                    });
+                }
+                
+                updateAllImagePreviews();
+            }
+
+            else if (type === 'selection-change') {
+                selectedImageCount = selectedNodeCount;
+                updateOptimizeButtonText();
+                if (selectedNodeCount === 0) {
+                    // 선택이 0개일 때는 UI를 명확히 비워줍니다.
+                    selectedImagesData.clear();
+                    previewListContainer.innerHTML = '';
+                    resizeUiToContentHeight(); 
+                } else {
+                    // 선택된 이미지가 있다면, code.ts에 데이터 요청을 보냅니다.
+                    parent.postMessage({ pluginMessage: { type: 'request-all-image-data' } }, '*');
+                }
+            }
+            
+            else if (type === 'process-image-data') {
+                const { imageNodeId, imageBytes, resizePercentage, quality, width, height, fileType: originalFileType } = event.data.pluginMessage;
+                const imgOriginalSize = imageBytes.byteLength;
+                
+                try {
+                    const targetFormatForOptimization = selectedFileFormats[0]; 
+                    const optimizedBytes = await optimizeImage(imageBytes, width, height, resizePercentage, quality, targetFormatForOptimization);
+                    
+                    parent.postMessage({ pluginMessage: {
+                        type: 'image-optimization-complete',
+                        imageNodeId: imageNodeId,
+                        optimizedBytes: optimizedBytes.buffer,
+                        originalSize: imgOriginalSize
+                    }}, '*');
+                } catch (error) {
+                    parent.postMessage({ pluginMessage: {
+                        type: 'image-optimization-failed',
+                        imageNodeId: imageNodeId,
+                        error: error.message
+                    }}, '*');
+                }
+            }
+            
+            else if (type === 'notify') {
+                alert(event.data.pluginMessage.message);
+            }
+        };
+    </script>
 </body>
 </html>

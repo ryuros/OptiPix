@@ -17,60 +17,123 @@ function formatBytes(bytes: number, decimals = 2): string {
 // 이미지 속성을 가진 노드의 타입을 정의 (width, height, fills 속성을 필수로 가짐)
 type ImageCapableNode = SceneNode & { width: number; height: number; fills: Paint[] };
 
+// 고유한 이미지 데이터를 저장할 타입 정의 (노드 + 이미지 해시)
+interface UniqueImageData {
+    nodeId: string;
+    nodeName: string;
+    imageHash: string; // 이미지의 고유 해시
+    imageBytes?: Uint8Array; // UI로 전송할 실제 바이트
+    width: number;
+    height: number;
+    fileType: string;
+    url?: string; // 썸네일 URL
+}
+
 /**
  * 선택된 모든 이미지 노드에서 데이터를 추출하여 UI로 일괄 전송합니다.
- * @param nodes 이미지 노드 배열
+ * @param uniqueImageCandidates 고유한 이미지 노드 후보 배열 (getUniqueImageCandidates에서 파싱된 결과)
  */
-async function sendAllImageDataToUI(nodes: ImageCapableNode[]): Promise<void> {
-    const imagesData = [];
-    for (const node of nodes) {
-        if (!('fills' in node && Array.isArray(node.fills) && 'width' in node && 'height' in node)) {
+async function sendAllImageDataToUI(uniqueImageCandidates: UniqueImageData[]): Promise<void> {
+    const imagesDataForUI = [];
+
+    for (const candidate of uniqueImageCandidates) {
+        if (candidate.imageBytes && candidate.url) {
+            imagesDataForUI.push({
+                nodeId: candidate.nodeId,
+                name: candidate.nodeName,
+                imageBytes: candidate.imageBytes.buffer,
+                width: candidate.width,
+                height: candidate.height,
+                fileType: candidate.fileType,
+                url: candidate.url,
+                imageHash: candidate.imageHash
+            });
             continue;
         }
-        const imageFill = (node.fills as Paint[]).find((fill): fill is ImagePaint => fill.type === 'IMAGE' && fill.imageHash !== null);
 
-        if (imageFill && imageFill.imageHash) {
-            const image = figma.getImageByHash(imageFill.imageHash);
-            if (image) {
-                try {
-                    const bytes = await image.getBytesAsync();
-                    const fileTypeForUI = 'PNG';
-                    const imageURL = await figma.base64Encode(bytes);
+        const image = figma.getImageByHash(candidate.imageHash);
+        if (image) {
+            try {
+                const bytes = await image.getBytesAsync();
+                const imageURL = await figma.base64Encode(bytes);
 
-                    imagesData.push({
+                imagesDataForUI.push({
+                    nodeId: candidate.nodeId,
+                    name: candidate.nodeName,
+                    imageBytes: bytes.buffer,
+                    width: candidate.width,
+                    height: candidate.height,
+                    fileType: candidate.fileType,
+                    url: `data:image/png;base64,${imageURL}`,
+                    imageHash: candidate.imageHash
+                });
+            } catch (e: any) {
+                console.error(`[code.ts] 이미지 "${candidate.nodeName}" (Hash: ${candidate.imageHash}) 로드 중 오류 발생:`, e);
+            }
+        }
+    }
+    figma.ui.postMessage({ type: 'selection-image-data-batch', imagesData: imagesDataForUI });
+}
+
+// 선택된 노드에서 고유한 이미지 해시를 가진 이미지 노드 정보를 추출하는 헬퍼 함수
+function getUniqueImageCandidates(selection: readonly SceneNode[]): UniqueImageData[] {
+    const uniqueImageMap = new Map<string, UniqueImageData>(); // Key: nodeId_imageHash
+    
+    for (const node of selection) {
+        if ('fills' in node && Array.isArray(node.fills) && 'width' in node && 'height' in node) {
+            const imageFills = (node.fills as Paint[]).filter((fill): fill is ImagePaint => fill.type === 'IMAGE' && fill.imageHash !== null);
+
+            for (const fill of imageFills) {
+                const uniqueKey = `${node.id}_${fill.imageHash}`; 
+                
+                if (!uniqueImageMap.has(uniqueKey)) {
+                    uniqueImageMap.set(uniqueKey, {
                         nodeId: node.id,
-                        name: node.name,
-                        imageBytes: bytes.buffer,
+                        nodeName: node.name,
+                        imageHash: fill.imageHash as string,
                         width: node.width,
                         height: node.height,
-                        fileType: fileTypeForUI,
-                        url: `data:image/png;base64,${imageURL}`
+                        fileType: 'PNG'
                     });
-                } catch (e: any) {
-                    console.error(`[code.ts] 이미지 "${node.name}" 로드 중 오류 발생:`, e);
                 }
             }
         }
     }
-    figma.ui.postMessage({ type: 'selection-image-data-batch', imagesData: imagesData });
+    return Array.from(uniqueImageMap.values());
 }
 
-figma.on('selectionchange', async () => {
-    const selectedNodes = figma.currentPage.selection;
-    const imageNodes: ImageCapableNode[] = selectedNodes.filter(node =>
-        'fills' in node && Array.isArray(node.fills) &&
-        (node.fills as Paint[]).some(fill => fill.type === 'IMAGE' && fill.imageHash !== null) &&
-        'width' in node && 'height' in node && node.width > 0 && node.height > 0
-    ) as ImageCapableNode[];
+// ★★★ 변경: selectionchange 이벤트 디바운스 로직 강화 ★★★
+let selectionChangeDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+const DEBOUNCE_DELAY_MS = 200; // 딜레이를 200ms로 늘려 안정성 강화
 
-    figma.ui.postMessage({ type: 'selection-change', selectedNodeCount: imageNodes.length });
+async function handleSelectionChange() {
+    console.log('[code.ts] selectionchange 이벤트 디바운스 후 실행.');
+    const uniqueImageCandidates = getUniqueImageCandidates(figma.currentPage.selection);
+    figma.ui.postMessage({ type: 'selection-change', selectedNodeCount: uniqueImageCandidates.length });
+    
+    if (uniqueImageCandidates.length > 0) {
+        await sendAllImageDataToUI(uniqueImageCandidates);
+    } else {
+        figma.ui.postMessage({ type: 'selection-image-data-batch', imagesData: [] });
+    }
+    selectionChangeDebounceTimer = null;
+}
+
+figma.on('selectionchange', () => {
+    console.log('[code.ts] selectionchange 이벤트 발생 (디바운스 시작).');
+    if (selectionChangeDebounceTimer) {
+        clearTimeout(selectionChangeDebounceTimer);
+    }
+    selectionChangeDebounceTimer = setTimeout(handleSelectionChange, DEBOUNCE_DELAY_MS);
 });
 
-// ★★★ 추가: 최적화 완료된 이미지 개수를 추적하는 변수 ★★★
+
 let totalImagesToProcess = 0;
 let processedImageCount = 0;
 
 figma.ui.onmessage = async (msg: { type: string; [key: string]: any }) => {
+    console.log(`[code.ts] UI로부터 메시지 수신 - Type: ${msg.type}`);
+
     if (msg.type === 'resize-ui') {
         const { width, height } = msg;
         const minHeight = 100;
@@ -79,15 +142,10 @@ figma.ui.onmessage = async (msg: { type: string; [key: string]: any }) => {
     }
     
     else if (msg.type === 'request-all-image-data') {
-        const selectedNodes = figma.currentPage.selection;
-        const imageNodes: ImageCapableNode[] = selectedNodes.filter(node =>
-            'fills' in node && Array.isArray(node.fills) &&
-            (node.fills as Paint[]).some(fill => fill.type === 'IMAGE' && fill.imageHash !== null) &&
-            'width' in node && 'height' in node && node.width > 0 && node.height > 0
-        ) as ImageCapableNode[];
-
-        if (imageNodes.length > 0) {
-            await sendAllImageDataToUI(imageNodes);
+        // UI가 데이터를 요청하면, 선택된 노드 정보를 가져와서 UI로 보냅니다.
+        const uniqueImageCandidates = getUniqueImageCandidates(figma.currentPage.selection);
+        if (uniqueImageCandidates.length > 0) {
+            await sendAllImageDataToUI(uniqueImageCandidates);
         } else {
             figma.ui.postMessage({ type: 'selection-image-data-batch', imagesData: [] });
         }
@@ -95,43 +153,35 @@ figma.ui.onmessage = async (msg: { type: string; [key: string]: any }) => {
 
     else if (msg.type === 'optimize-images') {
         const { resizePercentage, quality, fileFormats } = msg;
-        const selectedNodes = figma.currentPage.selection;
-        const imagesToProcess: ImageCapableNode[] = selectedNodes.filter(node =>
-            'fills' in node && Array.isArray(node.fills) &&
-            (node.fills as Paint[]).some(fill => fill.type === 'IMAGE' && fill.imageHash !== null)
-        ) as ImageCapableNode[];
+        const imagesToProcessCandidates = getUniqueImageCandidates(figma.currentPage.selection);
 
-        if (imagesToProcess.length === 0) {
+        if (imagesToProcessCandidates.length === 0) {
             figma.notify('선택된 레이어에 이미지가 없습니다. 이미지로 채워진 레이어를 선택해주세요.', { error: true });
             return;
         }
 
-        // ★★★ 변경: 최적화 시작 알림 및 전체 이미지 개수 설정 ★★★
-        figma.notify(`이미지 ${imagesToProcess.length}개 최적화 중...`, { timeout: 3000 });
-        totalImagesToProcess = imagesToProcess.length;
+        figma.notify(`이미지 ${imagesToProcessCandidates.length}개 최적화 중...`, { timeout: 3000 });
+        totalImagesToProcess = imagesToProcessCandidates.length;
         processedImageCount = 0;
 
-        for (const node of imagesToProcess) {
-            const imageFill = (node.fills as Paint[]).find((fill): fill is ImagePaint => fill.type === 'IMAGE' && fill.imageHash !== null);
+        for (const candidate of imagesToProcessCandidates) {
+            const image = figma.getImageByHash(candidate.imageHash);
             
-            if (imageFill && imageFill.imageHash) {
-                const image = figma.getImageByHash(imageFill.imageHash);
-                if (image) {
-                    try {
-                        const bytes = await image.getBytesAsync();
-                        figma.ui.postMessage({
-                            type: 'process-image-data',
-                            imageNodeId: node.id,
-                            imageBytes: bytes,
-                            resizePercentage: resizePercentage,
-                            quality: quality,
-                            width: node.width,
-                            height: node.height,
-                            fileType: fileFormats[0]
-                        });
-                    } catch (e: any) {
-                        figma.notify(`오류: 이미지 "${node.name || '알 수 없음'}"를 로드할 수 없습니다.`, { error: true });
-                    }
+            if (image) {
+                try {
+                    const bytes = await image.getBytesAsync();
+                    figma.ui.postMessage({
+                        type: 'process-image-data',
+                        imageNodeId: candidate.nodeId,
+                        imageBytes: bytes,
+                        resizePercentage: resizePercentage,
+                        quality: quality,
+                        width: candidate.width,
+                        height: candidate.height,
+                        fileType: fileFormats[0]
+                    });
+                } catch (e: any) {
+                    figma.notify(`오류: 이미지 "${candidate.nodeName}" (Hash: ${candidate.imageHash}) 로드 중 오류 발생:`, { error: true });
                 }
             }
         }
@@ -149,23 +199,25 @@ figma.ui.onmessage = async (msg: { type: string; [key: string]: any }) => {
                 const newFills: Paint[] = [];
                 for (const fill of node.fills) {
                     if (fill.type === 'IMAGE') {
-                        newFills.push({ ...fill, imageHash: newImageHash });
+                        const candidates = getUniqueImageCandidates([node as ImageCapableNode]);
+                        const originalCandidate = candidates.find(c => c.nodeId === imageNodeId && c.imageHash === fill.imageHash);
+
+                        if (originalCandidate) {
+                             newFills.push({ ...fill, imageHash: newImageHash });
+                        } else {
+                            newFills.push(fill);
+                        }
                     } else {
                         newFills.push(fill);
                     }
                 }
                 (node as RectangleNode | EllipseNode | PolygonNode | StarNode | TextNode | VectorNode).fills = newFills;
 
-                // ★★★ 변경: 각 이미지 완료 알림 제거 ★★★
-                // figma.notify(`원본: ${formatBytes(originalSize)} → 최적화: ${formatBytes(optimizedBytes.byteLength)}`);
-
-                // ★★★ 추가: 처리 완료된 이미지 개수 카운트 ★★★
                 processedImageCount++;
                 if (processedImageCount === totalImagesToProcess) {
-                    // ★★★ 추가: 모든 이미지 처리가 완료되면 최종 알림 표시 ★★★
                     figma.notify('이미지 최적화가 완료되었습니다!');
-                    totalImagesToProcess = 0; // 리셋
-                    processedImageCount = 0; // 리셋
+                    totalImagesToProcess = 0;
+                    processedImageCount = 0;
                 }
 
             } catch (error: any) {
@@ -208,18 +260,7 @@ figma.ui.onmessage = async (msg: { type: string; [key: string]: any }) => {
 };
 
 figma.on('run', async () => {
-    const selectedNodes = figma.currentPage.selection;
-    const imageNodes: ImageCapableNode[] = selectedNodes.filter(node =>
-        'fills' in node && Array.isArray(node.fills) &&
-        (node.fills as Paint[]).some(fill => fill.type === 'IMAGE' && fill.imageHash !== null) &&
-        'width' in node && 'height' in node && node.width > 0 && node.height > 0
-    ) as ImageCapableNode[];
-
-    figma.ui.postMessage({ type: 'selection-change', selectedNodeCount: imageNodes.length });
-    
-    if (imageNodes.length > 0) {
-        await sendAllImageDataToUI(imageNodes);
-    } else {
-        figma.ui.postMessage({ type: 'selection-image-data-batch', imagesData: [] });
-    }
+    // ★★★ 수정된 부분: 플러그인 실행 시, selectionchange와 동일한 로직을 실행합니다. ★★★
+    console.log('[code.ts] figma.on(run) 실행. 선택된 이미지 정보를 바로 UI로 전송합니다.');
+    await handleSelectionChange();
 });
